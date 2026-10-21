@@ -1,0 +1,39 @@
+name: StudentShield checks
+on: [push, pull_request]
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: studentshield
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: studentshield_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U studentshield"
+          --health-interval 3s --health-timeout 5s --health-retries 20
+      mail:
+        image: axllent/mailpit:v1.27
+        ports: [1025:1025, 8025:8025]
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://studentshield:test-only-password@localhost:5432/studentshield_test
+      APP_URL: http://localhost:3000
+      SMTP_HOST: 127.0.0.1
+      SMTP_PORT: 1025
+      SMTP_FROM: no-reply@studentshield.local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: |
+          node --input-type=module -e 'import {randomBytes} from "node:crypto"; import {appendFileSync} from "node:fs"; appendFileSync(process.env.GITHUB_ENV, `SESSION_SECRET=${randomBytes(48).toString("hex")}\nDATA_ENCRYPTION_KEY=${randomBytes(32).toString("hex")}\n`);'
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm test

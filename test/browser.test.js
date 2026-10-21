@@ -1,0 +1,61 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { chromium } from 'playwright-core';
+import { db, pool } from '../src/db.js';
+import { passwordHash, random } from '../src/security.js';
+
+test('Chromium: login, account update, policy, school, dark/light and mobile', { timeout: 60000 }, async () => {
+  const suffix = random().slice(0, 8), email = `browser-${suffix}@example.com`;
+  const user = await db.user.create({ data: { email, name: 'Kiểm thử giao diện', role: 'SUPER_ADMIN', verified: true, passwordHash: await passwordHash('Browser-test-password-2026!') } });
+  const server = spawn(process.execPath, ['src/server.js'], { env: { ...process.env, PORT: '3101', APP_URL: 'http://localhost:3101' }, stdio: 'pipe' });
+  let browser, schoolId;
+  const errors = [];
+  try {
+    await new Promise((resolve, reject) => { server.stdout.on('data', data => { if (data.toString().includes('listening')) resolve(); }); server.on('exit', code => reject(new Error(`Server exited ${code}`))); });
+    browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), headless: true, args: ['--no-sandbox'] });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto('http://localhost:3101');
+    await page.getByLabel('Email', { exact: true }).fill(email);
+    await page.getByLabel('Mật khẩu (12–128 ký tự)').fill('Browser-test-password-2026!');
+    await page.getByRole('button', { name: 'Đăng nhập an toàn' }).click();
+    await page.getByRole('heading', { name: 'Việc nên làm tiếp theo' }).waitFor();
+    await page.screenshot({ path: '/tmp/studentshield-dashboard.png', fullPage: true });
+    await page.getByRole('button', { name: 'Tài khoản bảo vệ' }).click();
+    await page.getByLabel('Dịch vụ / tên tài khoản').fill('University email');
+    await page.getByLabel('Email tài khoản').fill(email);
+    await page.getByRole('button', { name: 'Thêm tài khoản', exact: true }).click();
+    await page.getByRole('heading', { name: 'University email' }).waitFor();
+    await page.locator('[data-flag="has2fa"]').check();
+    await page.waitForTimeout(150);
+    assert.equal((await db.protectedAccount.findFirst({ where: { userId: user.id } })).has2fa, true);
+    await page.getByRole('button', { name: 'Chính sách hệ thống' }).click();
+    await page.getByLabel('Độ dài mật khẩu tối thiểu (12–64)').waitFor();
+    await page.getByRole('button', { name: 'Lưu chính sách' }).click();
+    await page.getByRole('button', { name: 'Quản lý trường' }).click();
+    await page.getByLabel('Tên trường', { exact: true }).fill('Browser Test School');
+    await page.getByLabel('Mã trường (3–20 chữ hoa, số, _ hoặc -)').fill(`UI-${suffix.toUpperCase()}`);
+    await page.getByRole('button', { name: 'Tạo trường', exact: true }).click();
+    await page.getByRole('heading', { name: 'Browser Test School' }).waitFor();
+    schoolId = (await db.school.findUnique({ where: { code: `UI-${suffix.toUpperCase()}` } })).id;
+    await page.getByRole('button', { name: 'Đổi giao diện' }).click();
+    assert.equal(await page.locator('body').evaluate(el => el.classList.contains('light')), true);
+    await page.getByRole('button', { name: 'Tổng quan bảo mật' }).click();
+    await page.getByRole('heading', { name: 'Việc nên làm tiếp theo' }).waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: '/tmp/studentshield-mobile.png', fullPage: true });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.deepEqual(errors, []);
+    await page.getByRole('button', { name: 'Đăng xuất' }).click();
+    await page.getByRole('button', { name: 'Đăng nhập an toàn' }).waitFor();
+  } finally {
+    if (browser) await browser.close(); server.kill('SIGTERM');
+    await db.securityEvent.deleteMany({ where: { userId: user.id } });
+    await db.user.delete({ where: { id: user.id } });
+    if (schoolId) await db.school.delete({ where: { id: schoolId } });
+    await pool.query("DELETE FROM session WHERE sess->>'userId' = $1", [user.id]);
+    await db.$disconnect(); await pool.end();
+  }
+});
