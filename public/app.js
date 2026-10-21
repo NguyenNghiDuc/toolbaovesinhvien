@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const view = $('#view');
-let user, token, page = 'dashboard';
+let user, token, page = 'dashboard', localMail = false;
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const field = (name, label, type = 'text', extra = '') => `<label>${label}<input name="${name}" type="${type}" ${extra}></label>`;
 const check = (name, label) => `<label class="check"><input name="${name}" type="checkbox">${label}</label>`;
@@ -32,7 +32,7 @@ function shell() {
 function auth(mode = 'login') {
   user = null; shell(); $('#title').textContent = 'Bảo vệ thế giới số của bạn.';
   const titles = { login: 'Chào mừng trở lại', register: 'Bắt đầu hành trình an toàn', forgot: 'Khôi phục tài khoản', resend: 'Gửi lại email xác minh' };
-  view.innerHTML = `<div class="card hero"><span class="tag">STUDENTSHIELD 4.0</span><h2>Một nơi cho mọi lớp bảo vệ.</h2><p>Quản lý tài khoản, kiểm soát thiết bị và xây dựng thói quen an toàn số.</p></div><div class="card auth"><div class="tabs"><button data-mode="login">Đăng nhập</button><button data-mode="register">Đăng ký</button><button data-mode="forgot">Quên mật khẩu</button><button data-mode="resend">Xác minh email</button></div><h2>${titles[mode]}</h2><form class="form" id="auth">${mode === 'register' ? field('name', 'Họ và tên', 'text', 'required maxlength="100" autocomplete="name"') : ''}${field('email', 'Email', 'email', 'required autocomplete="email"')}${['login', 'register'].includes(mode) ? field('password', 'Mật khẩu (12–128 ký tự)', 'password', `required minlength="12" maxlength="128" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}"`) : ''}${mode === 'login' ? field('code', 'Mã 2FA hoặc mã khôi phục (nếu đã bật)', 'text', 'autocomplete="one-time-code"') : ''}${mode === 'register' ? field('schoolCode', 'Mã trường (không bắt buộc)') : ''}${btn(mode === 'login' ? 'Đăng nhập an toàn →' : 'Tiếp tục →')}</form></div>`;
+  view.innerHTML = `<div class="card hero"><span class="tag">STUDENTSHIELD 4.0</span><h2>Một nơi cho mọi lớp bảo vệ.</h2><p>Quản lý tài khoản, kiểm soát thiết bị và xây dựng thói quen an toàn số.</p></div><div class="card auth"><div class="tabs"><button data-mode="login">Đăng nhập</button><button data-mode="register">Đăng ký</button><button data-mode="forgot">Quên mật khẩu</button><button data-mode="resend">Xác minh email</button></div><h2>${titles[mode]}</h2>${localMail ? '<p class="muted">Email thử nghiệm: mở terminal thứ hai và chạy <code>npm run mail</code> để lấy liên kết xác minh hoặc khôi phục. Email không được gửi đến hộp thư thật.</p>' : ''}<form class="form" id="auth">${mode === 'register' ? field('name', 'Họ và tên', 'text', 'required maxlength="100" autocomplete="name"') : ''}${field('email', 'Email', 'email', 'required autocomplete="email"')}${['login', 'register'].includes(mode) ? field('password', 'Mật khẩu (12–128 ký tự)', 'password', `required minlength="12" maxlength="128" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}"`) : ''}${mode === 'login' ? field('code', 'Mã 2FA hoặc mã khôi phục (nếu đã bật)', 'text', 'autocomplete="one-time-code"') : ''}${mode === 'register' ? field('schoolCode', 'Mã trường (không bắt buộc)') : ''}${btn(mode === 'login' ? 'Đăng nhập an toàn →' : 'Tiếp tục →')}</form></div>`;
   view.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => auth(b.dataset.mode));
   form('#auth', async data => { const result = await api(`/auth/${mode}`, 'POST', data); if (result.user) { user = result.user; await csrf(); await go('dashboard'); } else toast(result.message); });
 }
@@ -124,6 +124,7 @@ if (localStorage.getItem('ss.theme') === 'light') document.body.classList.add('l
 $('#logout').onclick = async () => { try { await api('/logout', 'POST', {}); await csrf(); auth(); } catch (e) { toast(e.message); } };
 async function boot() {
   await csrf();
+  localMail = (await api('/runtime')).localMail;
   const params = new URLSearchParams(location.hash.slice(1));
   const verify = params.get('verify'), reset = params.get('reset');
   if (verify || reset) history.replaceState(null, '', location.pathname);

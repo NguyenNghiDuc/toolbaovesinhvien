@@ -1,9 +1,12 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { dataDir } from '../src/config.js';
 import ExcelJS from 'exceljs';
 import { app } from '../src/app.js';
-import { db, pool } from '../src/db.js';
+import { db, sessions } from '../src/db.js';
 import { hash, random, passwordHash, totp, decrypt } from '../src/security.js';
 const suffix = random().slice(0, 10);
 const address = `student-${suffix}@example.com`;
@@ -14,18 +17,18 @@ async function token(a = agent) { return (await a.get('/api/csrf')).body.token; 
 const post = (path, data, a = agent, t = csrf) => a.post('/api' + path).set('x-csrf-token', t).send(data);
 const login = async (a, email, code) => { const t = await token(a); return post('/auth/login', { email, password, code }, a, t); };
 before(async () => {
-  await db.$queryRaw`SELECT 1`;
+  await db.user.count();
   csrf = await token();
   schoolA = await db.school.create({ data: { name: 'Test A', code: `A-${suffix.toUpperCase()}` } });
   schoolB = await db.school.create({ data: { name: 'Test B', code: `B-${suffix.toUpperCase()}` } });
 });
 after(async () => {
   const users = await db.user.findMany({ where: { email: { contains: suffix } }, select: { id: true } });
-  for (const u of users) await pool.query("DELETE FROM session WHERE sess->>'userId' = $1", [u.id]);
+  for (const u of users) await sessions.revokeUser(u.id);
   await db.securityEvent.deleteMany({ where: { userId: { in: users.map(u => u.id) } } });
   await db.user.deleteMany({ where: { id: { in: users.map(u => u.id) } } });
   await db.school.deleteMany({ where: { id: { in: [schoolA?.id, schoolB?.id].filter(Boolean) } } });
-  await db.$disconnect(); await pool.end();
+  await db.$disconnect();
 });
 test('CSRF rejects mutation without session token', async () => { const r = await request(app).post('/api/auth/register').send({}); assert.equal(r.status, 403); });
 test('register hashes password and requires verified email', async () => {
@@ -36,11 +39,10 @@ test('register hashes password and requires verified email', async () => {
   assert.equal((await login(agent, address)).status, 403);
   const tokens = await db.token.findMany({ where: { userId: uid, kind: 'verify' } }); assert.equal(tokens.length, 1);
 });
-test('SMTP sends real verification link, token single-use', async () => {
-  const messages = await (await fetch('http://localhost:8025/api/v1/messages')).json();
-  const msg = messages.messages.find(m => m.To.some(t => t.Address === address)); assert.ok(msg, 'verification email delivered');
-  const full = await (await fetch(`http://localhost:8025/api/v1/message/${msg.ID}`)).json();
-  const raw = full.Text.match(/#verify=([a-f0-9]{64})/)[1];
+test('local inbox delivers verification link, token single-use', async () => {
+  const messages = fs.readdirSync(path.join(dataDir, 'mail')).map(f => JSON.parse(fs.readFileSync(path.join(dataDir, 'mail', f), 'utf8')));
+  const full = messages.find(m => m.to === address && m.text.includes('#verify=')); assert.ok(full, 'verification email delivered to local inbox');
+  const raw = full.text.match(/#verify=([a-f0-9]{64})/)[1];
   assert.equal((await post('/auth/verify', { token: raw })).status, 200);
   assert.equal((await post('/auth/verify', { token: raw })).status, 400);
 });

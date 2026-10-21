@@ -1,27 +1,14 @@
 services:
-  db:
-    image: postgres:17
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: studentshield
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong database password}
-      POSTGRES_DB: studentshield
-    volumes: ["production_pgdata:/var/lib/postgresql/data"]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U studentshield"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
   app:
     build: .
     restart: unless-stopped
     env_file: ${STUDENTSHIELD_ENV_FILE:?Set the absolute path to production environment file}
     environment:
       NODE_ENV: production
+      HOST: 0.0.0.0
       PORT: 8080
-    depends_on:
-      db:
-        condition: service_healthy
+      DATA_DIR: /app/data
+    volumes: ["studentshield_data:/app/data"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -39,6 +26,6 @@ services:
       - caddy_config:/config
     depends_on: [app]
 volumes:
-  production_pgdata:
+  studentshield_data:
   caddy_data:
   caddy_config:

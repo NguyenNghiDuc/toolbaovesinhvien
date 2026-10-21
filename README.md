@@ -1,42 +1,67 @@
-# StudentShield v4.0
+# StudentShield v4 — chạy không cần database
 
-Nền tảng bảo mật sinh viên với giao diện HTML/CSS/JavaScript tiếng Việt, Node.js 24 LTS, Express, PostgreSQL và Prisma. Checkout ban đầu chỉ có README; giao diện v4 được xây mới, không có mã v3 để chuyển đổi.
+Ứng dụng bảo mật sinh viên bằng Node.js 24 + Express và HTML/CSS/JavaScript. **Không cần PostgreSQL, Prisma, Docker hoặc cấu hình `.env` để chạy trên máy cá nhân.**
 
-## Chạy phát triển
+## Chạy ngay trên Windows / PowerShell
 
-```sh
-npm ci
-cp .env.example .env
-```
+Mở terminal tại thư mục có `package.json`:
 
-Điền `SESSION_SECRET` (ít nhất 32 ký tự ngẫu nhiên), `DATA_ENCRYPTION_KEY` (32 byte dạng hex). Tạo bằng `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`; dùng hai giá trị khác nhau. Không commit `.env`. Không thay khóa mã hóa khi đã có TOTP nếu chưa có kế hoạch chuyển khóa.
-
-```sh
-docker compose up -d
-npx prisma generate
-npx prisma migrate deploy
+```powershell
+npm install
 npm run dev
 ```
 
-Ứng dụng dùng cổng 8080. PostgreSQL dùng cổng 5432. Mailpit nhận SMTP ở cổng 1025, hộp thư phát triển ở cổng 8025. Các cổng Docker chỉ bind loopback. Cấu hình mẫu và mật khẩu database mẫu chỉ dành cho phát triển. Cần truy cập `registry.npmjs.org` và Docker Hub để cài công cụ; không tắt kiểm tra TLS/checksum.
+Mở `http://localhost:8080`. Lần sau chỉ cần `npm run dev`. Khi tải lại ZIP từ GitHub, giải nén vào thư mục riêng; không ghi đè hoặc xóa thư mục `data/` chứa dữ liệu đã có.
 
-Lần đầu, cấu hình `BOOTSTRAP_EMAIL`, `BOOTSTRAP_PASSWORD` qua môi trường riêng rồi chạy `npm run bootstrap`. Lệnh chỉ tạo Super Admin khi chưa có Super Admin. Xóa các biến bootstrap sau đó và bật 2FA. Đăng ký thông thường luôn tạo USER, không cho người dùng tự chọn vai trò. Mã trường dùng để tham gia trường, không phải bí mật phân quyền.
+Nếu đã cài bản cũ, chạy lại `npm install` để cập nhật thư viện. `DATABASE_URL` còn trong `.env` cũ sẽ bị bỏ qua; không chạy `npx prisma ...` hay `docker compose ...` nữa. Không có chuyển dữ liệu PostgreSQL cũ tự động sang file JSON.
 
-## Các luồng
+Không cần tạo `.env` hoặc khóa thủ công. Cấu hình tùy chọn có trong `.env.example`. App mặc định chỉ lắng nghe `127.0.0.1`, cổng 8080. `npm start` chạy không có chế độ theo dõi file.
 
-- Đăng ký, liên kết xác minh email dùng một lần, gửi lại xác minh; đăng nhập và đăng xuất.
-- Quên mật khẩu và reset hết hạn sau 30 phút; reset thu hồi phiên nhưng giữ nguyên 2FA.
-- Argon2id; session PostgreSQL, cookie HttpOnly/SameSite, Secure khi production; CSRF theo phiên và kiểm tra Origin; Helmet và rate limit.
-- TOTP mã hóa AES-256-GCM, mã khôi phục băm một chiều dùng một lần, chặn tái dùng bước TOTP khi đăng nhập. Bật/tắt yêu cầu xác thực lại; thay đổi bảo mật làm vô hiệu các phiên khác.
-- Danh sách phiên/thiết bị, thu hồi từ xa; nhật ký, email đăng nhập mới, đổi/reset mật khẩu, thay đổi 2FA và nhiều lần đăng nhập thất bại.
-- Hồ sơ, ảnh đại diện dạng biểu tượng có sẵn, đổi mật khẩu; dashboard 0–100 và đề xuất từ dữ liệu tự khai báo.
-- Thêm, cập nhật trạng thái và xóa nhiều tài khoản cần bảo vệ. **Không lưu mật khẩu tài khoản bên ngoài.**
-- Kiểm tra mật khẩu hoàn toàn trong trình duyệt. Kiểm tra URL bằng quy tắc tĩnh, không truy cập đích: HTTPS, IP, punycode, link rút gọn, URL có thông tin đăng nhập và đường dẫn đáng ngờ. Không có tra cứu danh tiếng hoặc giải redirect; kết quả không xác nhận URL an toàn.
-- Bài học và lưu tiến độ; bài toàn hệ thống hoặc trong trường; PDF tổng quan và Excel tài khoản.
-- Admin quản lý USER, thống kê và nhật ký trong trường, bài học của trường, xuất Excel. Super Admin tạo trường, cấp ADMIN và chuyển trường; không cho thay đổi tài khoản Super Admin qua API.
-- Giao diện responsive, dark/light; chỉ lựa chọn giao diện được lưu ở localStorage. Thông tin tài khoản và xác thực nằm trong PostgreSQL.
+## Đăng ký và email thử nghiệm
 
-Quản trị người dùng hiện giới hạn 200 dòng, nhật ký 100, báo cáo trường 10.000 người dùng. Điểm bảo mật không phải đánh giá độc lập. IP và User-Agent giúp người dùng nhận diện phiên, không phải nhận diện thiết bị đáng tin cậy. Bài học đánh dấu hoàn thành do người dùng tự khai báo, chưa có bài thi.
+1. Đăng ký tài khoản bằng giao diện.
+2. Mở terminal thứ hai tại cùng thư mục, chạy:
+
+```powershell
+npm run mail
+```
+
+3. Mở liên kết xác minh được hiển thị, rồi đăng nhập.
+
+Quên mật khẩu cũng dùng hộp thư này. Chế độ `MAIL_MODE=file` chỉ mô phỏng gửi email bằng file trên máy; không gửi đến hộp thư thật và không chứng minh quyền sở hữu địa chỉ email. Không có API công khai để đọc hộp thư thử nghiệm. Muốn gửi thật, đặt `MAIL_MODE=smtp` và cấu hình SMTP riêng.
+
+## Dữ liệu nằm ở đâu?
+
+- `data/store.json`: tài khoản, mật khẩu băm Argon2id, thông tin trường, bài học, nhật ký, token băm, TOTP đã mã hóa và phiên đăng nhập.
+- `data/keys.json`: khóa ký phiên và khóa mã hóa TOTP được tạo tự động, giữ nguyên qua các lần khởi động.
+- `data/mail/`: email thử nghiệm, có thể chứa liên kết xác minh hoặc đặt lại mật khẩu.
+- `data/store.lock`: ngăn hai tiến trình cùng ghi đè dữ liệu. Chạy một tiến trình cho mỗi thư mục dữ liệu. Sau khi tiến trình cũ đã dừng, khóa cũ được tự thu hồi khi khởi động.
+
+Thư mục `data/` và `.env` được bỏ qua bởi Git và Docker build. Sao lưu cả `data/` khi app đã dừng; bảo vệ bằng quyền truy cập của hệ điều hành. Mất khóa mã hóa có thể làm mất khả năng dùng TOTP. Mật khẩu không lưu dạng văn bản thuần. Không xóa dữ liệu hoặc khóa để khắc phục lỗi khởi động; khôi phục bản sao lưu khi file hỏng.
+
+Đây là lưu trữ file cục bộ cho một tiến trình, không phải hệ thống database phân tán. Không dùng nhiều replica hoặc thư mục trên ổ mạng để cùng ghi. Ghi file dùng thay thế nguyên tử; lỗi transaction được hoàn tác trước khi ghi. Dữ liệu PostgreSQL trước đây không bị xóa hoặc thay đổi.
+
+## Tính năng
+
+- Đăng ký, đăng nhập/đăng xuất, liên kết xác minh và đặt mật khẩu một lần; chống CSRF, rate limit, Argon2id, cookie HttpOnly/SameSite.
+- TOTP mã hóa, mã khôi phục dùng một lần; quản lý và thu hồi phiên, đổi mật khẩu, nhật ký và cảnh báo.
+- Dashboard 0–100 dựa trên dữ liệu tự khai báo; quản lý nhiều tài khoản cần bảo vệ, không lưu mật khẩu tài khoản bên ngoài.
+- Hồ sơ và avatar biểu tượng, dark/light, responsive; công cụ mật khẩu xử lý trong trình duyệt; URL phân tích tĩnh không truy cập đích và không cam kết an toàn.
+- Phân quyền USER/ADMIN/SUPER_ADMIN; trường học, quản trị trong phạm vi trường, chính sách, bài học và tiến độ; PDF/Excel.
+
+Tạo Super Admin một lần bằng PowerShell: dừng app bằng Ctrl+C trước vì tiện ích quản trị cần quyền ghi độc quyền vào file.
+
+```powershell
+$env:BOOTSTRAP_EMAIL = Read-Host 'Email Super Admin'
+$secret = Read-Host 'Mật khẩu (ít nhất 12 ký tự)' -AsSecureString
+$env:BOOTSTRAP_PASSWORD = [System.Net.NetworkCredential]::new('', $secret).Password
+npm run bootstrap
+Remove-Item Env:BOOTSTRAP_PASSWORD
+Remove-Item Env:BOOTSTRAP_EMAIL
+npm run dev
+```
+
+Không có tài khoản hoặc mật khẩu Admin mặc định. Bật 2FA sau khi tạo.
 
 ## Kiểm thử
 
@@ -44,43 +69,22 @@ Quản trị người dùng hiện giới hạn 200 dòng, nhật ký 100, báo 
 npm test
 ```
 
-Cần Chromium hệ thống (`/usr/bin/chromium`, hoặc `CHROMIUM_PATH`), hoặc chạy `npx playwright-core install --with-deps chromium` cho kiểm thử trình duyệt. Cần một PostgreSQL **dành riêng cho kiểm thử**, schema đã migrate, SMTP Mailpit và API Mailpit ở cổng 8025. Test tạo tài khoản có hậu tố ngẫu nhiên, kiểm tra email nhận được, dữ liệu thực, CSRF, phân quyền theo trường, TOTP, token một lần, thu hồi phiên và xuất file; dọn dữ liệu do test tạo. Không chạy test trên production. Workflow GitHub Actions cung cấp các service tương ứng.
-
-Chỉ kiểm tra mã hóa độc lập: `node --env-file=.env --test test/security.test.js`.
-
-## Triển khai production
-
-Cần máy chủ/nhà cung cấp, tên miền HTTPS, PostgreSQL được quản lý/sao lưu và SMTP thực trước khi public. Chưa có triển khai từ xa được thực hiện trong repository này.
+Test tự tạo thư mục tạm và không cần database/SMTP; kiểm tra luồng xác thực, file email, phân quyền theo trường, phiên, 2FA, xuất file, transaction và dữ liệu qua lần khởi động lại. Test trình duyệt cần Chromium hệ thống hoặc:
 
 ```sh
-docker build -t studentshield:4 .
-# Đặt biến thực trong file bảo mật bên ngoài checkout, gồm NODE_ENV=production.
-# Chạy migration một lần trước khi khởi động phiên bản mới:
-docker run --rm --env-file /secure/studentshield.env studentshield:4 npx prisma migrate deploy
-docker run -d --name studentshield --restart unless-stopped --env-file /secure/studentshield.env -p 127.0.0.1:8080:8080 studentshield:4
+npx playwright-core install --with-deps chromium
 ```
 
-Đặt `APP_URL=https://ten-mien-cua-ban`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM` và thông tin SMTP nếu cần. `SMTP_SECURE=true` dành cho TLS ngay từ đầu (thường cổng 465), false cho STARTTLS (thường cổng 587). Không dùng Mailpit trong production. PostgreSQL phải dùng TLS xác minh chứng chỉ theo nhà cung cấp; không vô hiệu kiểm tra chứng chỉ. Proxy HTTPS cần đứng ngay trước app, ghi đè X-Forwarded-For/Proto và chặn truy cập trực tiếp cổng app: Express tin đúng một proxy. Rate limit IP ở bộ nhớ tiến trình, giới hạn đăng nhập theo tài khoản dùng nhật ký PostgreSQL; khi chạy nhiều replica cần bổ sung rate-limit store dùng chung hoặc gateway.
+GitHub Actions đã cấu hình kiểm thử tương ứng, không có service PostgreSQL.
 
-Mật khẩu đăng nhập ít nhất 12, tối đa 128 ký tự. Sau 10 lần đăng nhập thất bại trong 15 phút, tài khoản tạm hạn chế; API auth giới hạn 30 yêu cầu/IP/15 phút. Super Admin có thể chỉnh độ dài mật khẩu tối thiểu (12–64), giới hạn thất bại (3–20) và thời hạn phiên (1–24 giờ) ở trang Chính sách hệ thống. Các thay đổi áp dụng cho mật khẩu mới và phiên mới. Super Admin hiện quản lý trường/quyền, không có quyền thay biến môi trường hoặc bí mật qua giao diện.
+## Triển khai VPS (tùy chọn)
 
-Chạy `npm run maintenance` hằng ngày để dọn token, phiên hết hạn và nhật ký cũ hơn `EVENT_RETENTION_DAYS` (mặc định 90 ngày). Email gửi đồng bộ; lỗi gửi cảnh báo được ghi `EMAIL_DELIVERY_FAILED`, chưa có hàng đợi tự retry. Sao lưu PostgreSQL và khóa mã hóa riêng, diễn tập khôi phục. Không ghi token, mật khẩu hoặc secret vào log.
+Có thể dùng Node.js trực tiếp với process manager, hoặc `compose.production.yaml` cho app + Caddy, không có database service. Mặc định chỉ bind loopback; khi chạy container, dùng `HOST=0.0.0.0`. Mount volume `/app/data` để giữ dữ liệu. Chỉ chạy một container ghi dữ liệu.
 
-Không thu thập ngày sinh, điểm học tập hoặc dữ liệu sinh viên ngoài tên/email/trường và dữ liệu bảo mật cần thiết. Thời hạn lưu và quyền truy cập nên được thống nhất với đơn vị vận hành trước khi dùng cho trường thật.
-
-### VPS với HTTPS tự động
-
-`compose.production.yaml` chạy PostgreSQL nội bộ, app và Caddy; chỉ public 80/443. Tạo DNS A/AAAA trỏ về VPS, mở 80/443, cài Docker Engine và Compose. Sao chép `deploy/production.env.example` ra `/secure/studentshield.env`, đặt quyền 600 và điền giá trị thực. Mật khẩu trong DATABASE_URL phải được URL-encode, khớp POSTGRES_PASSWORD. Docker network riêng dùng kết nối PostgreSQL nội bộ; nếu dùng database từ xa hãy bật TLS có xác minh chứng chỉ.
+Sao chép `deploy/production.env.example` ra ngoài checkout, điền tên miền và SMTP thật. `NODE_ENV=production` yêu cầu HTTPS APP_URL và MAIL_MODE=smtp. Caddy đứng trước app và tự cấp HTTPS; không public trực tiếp cổng app. App tin một reverse proxy; nếu chạy trực tiếp, đặt proxy phù hợp trước khi bật production.
 
 ```sh
-docker compose --env-file /secure/studentshield.env -f compose.production.yaml build
-docker compose --env-file /secure/studentshield.env -f compose.production.yaml up -d db
-docker compose --env-file /secure/studentshield.env -f compose.production.yaml run --rm app npx prisma migrate deploy
-docker compose --env-file /secure/studentshield.env -f compose.production.yaml up -d
+docker compose --env-file /secure/studentshield.env -f compose.production.yaml up -d --build
 ```
 
-Cấp bootstrap email/mật khẩu an toàn vào môi trường của container tác vụ riêng để chạy bootstrap một lần; không để chúng trong cấu hình app lâu dài. Kiểm tra `/healthz` và luồng đăng ký/xác minh email sau triển khai. Đặt lịch `maintenance`, sao lưu volume PostgreSQL và caddy_data. Không dùng lệnh `down -v` trên production. Chưa có VPS/tên miền được cung cấp nên cấu hình này chưa được triển khai ra Internet.
-
-## Trạng thái kiểm chứng trong cloud
-
-17 kiểm thử tích hợp/Chromium/mã hóa đã qua và migration đã được thử trên database mới trước lượt cài sạch. `npm audit` hiện không báo lỗ hổng đã biết. Lượt cài sạch sau đó phát hiện Prisma CLI cần tải schema engine từ `binaries.prisma.sh`, hiện bị proxy trả HTTP 403. Docker build cũng dừng ở bước này. Không tắt kiểm tra checksum hoặc TLS. Cần lưu quyền truy cập tên miền này trong cài đặt cloud rồi chạy lại script cài đặt, `npm test` và Docker build; không coi bản hiện tại là đã sẵn sàng production. Cổng ứng dụng theo yêu cầu là 8080. Chưa có địa chỉ VPS/tên miền hoặc SMTP production để triển khai thật.
+Chưa có VPS hoặc tên miền được cung cấp, nên chưa triển khai public. Chạy `npm run maintenance` khi app đã dừng để dọn token, phiên và nhật ký cũ (mặc định 90 ngày). Email SMTP chưa có hàng đợi retry. Không coi hộp thư file là xác minh email thật trong môi trường nhiều người dùng.

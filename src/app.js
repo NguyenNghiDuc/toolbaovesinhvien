@@ -1,7 +1,7 @@
 import './config.js';
 import express from 'express';
 import session from 'express-session';
-import connectPgSimple from 'connect-pg-simple';
+import { LocalSessionStore } from './session-store.js';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import argon2 from 'argon2';
@@ -11,19 +11,18 @@ import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
-import { db, pool } from './db.js';
-import { production, origin } from './config.js';
+import { db, sessions } from './db.js';
+import { production, origin, mailMode } from './config.js';
 import { random, hash, encrypt, decrypt, passwordHash, passwordValid, totp, score } from './security.js';
 import { sendToken, notify } from './mail.js';
 export const app = express();
 app.disable('x-powered-by');
 if (production) app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:'] } } }));
-app.get('/healthz', async (req, res) => { try { await db.$queryRaw`SELECT 1`; res.json({ status: 'ok' }); } catch { res.status(503).json({ status: 'unavailable' }); } });
+app.get('/healthz', async (req, res) => { try { await db.user.count(); res.json({ status: 'ok' }); } catch { res.status(503).json({ status: 'unavailable' }); } });
 app.use(express.json({ limit: '32kb' }));
 app.use('/api', rateLimit({ windowMs: 60000, limit: 150, message: { error: 'Quá nhiều yêu cầu. Vui lòng thử lại sau.' }, standardHeaders: 'draft-8', legacyHeaders: false }));
-const Store = connectPgSimple(session);
-app.use(session({ store: new Store({ pool, createTableIfMissing: false }), secret: process.env.SESSION_SECRET, resave: false, saveUninitialized: false, name: 'ss.sid', cookie: { httpOnly: true, secure: production, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 8 } }));
+app.use(session({ store: new LocalSessionStore(), secret: process.env.SESSION_SECRET, resave: false, saveUninitialized: false, name: 'ss.sid', cookie: { httpOnly: true, secure: production, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 8 } }));
 app.use('/api', async (req, res, next) => {
   req.policy = await db.systemPolicy.findUnique({ where: { id: 'global' } }) || { minPasswordLength: 12, maxFailedLogins: 10, sessionHours: 8 };
   next();
@@ -41,6 +40,7 @@ async function alert(req, user, type) {
   try { await notify(user.email, 'Cảnh báo bảo mật StudentShield', `${type}\nThời gian: ${new Date().toISOString()}\nNếu không phải bạn, hãy đổi mật khẩu và thu hồi các phiên đăng nhập.`); }
   catch { await event(req, 'EMAIL_DELIVERY_FAILED', user.id); }
 }
+app.get('/api/runtime', (req, res) => res.json({ localMail: mailMode === 'file' }));
 app.get('/api/csrf', (req, res) => { req.session.csrf ||= random(); res.json({ token: req.session.csrf }); });
 app.use('/api', (req, res, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
@@ -91,7 +91,7 @@ async function verifyFactor(user, code) {
   }
   const codeHash = hash(code);
   if (!user.recoveryHashes.includes(codeHash)) return false;
-  return await db.$executeRaw`UPDATE "User" SET "recoveryHashes" = array_remove("recoveryHashes", ${codeHash}) WHERE id = ${user.id} AND ${codeHash} = ANY("recoveryHashes")` === 1;
+  return db.consumeRecovery(user.id, codeHash);
 }
 app.post('/api/auth/login', async (req, res) => {
   const address = email(req.body.email) ? normalize(req.body.email) : '';
@@ -126,7 +126,7 @@ app.post('/api/auth/reset', async (req, res) => {
     if (!(await tx.token.deleteMany({ where: { id: token.id } })).count) throw fail(400, 'Liên kết đã được dùng');
     const user = await tx.user.update({ where: { id: token.userId }, data: { passwordHash: password, sessionVersion: { increment: 1 } } });
     await tx.token.deleteMany({ where: { userId: user.id, kind: 'reset' } });
-    await tx.$executeRaw`DELETE FROM session WHERE sess->>'userId' = ${user.id}`;
+    await sessions.revokeUser(user.id);
     return user;
   });
   await alert(req, user, 'PASSWORD_RESET');
@@ -149,7 +149,7 @@ app.patch('/api/profile', async (req, res) => {
 app.post('/api/password', async (req, res) => {
   if (!passwordValid(req.body.password) || req.body.password.length < req.policy.minPasswordLength || !await argon2.verify(req.user.passwordHash, String(req.body.currentPassword || '').slice(0, 129)) || !await verifyFactor(req.user, req.body.code)) throw fail(400, 'Mật khẩu hoặc mã xác thực không hợp lệ');
   await db.user.update({ where: { id: req.user.id }, data: { passwordHash: await passwordHash(req.body.password), sessionVersion: { increment: 1 } } });
-  await pool.query("DELETE FROM session WHERE sess->>'userId' = $1", [req.user.id]);
+  await sessions.revokeUser(req.user.id);
   await alert(req, req.user, 'PASSWORD_CHANGED');
   res.json({ message: 'Đã đổi mật khẩu. Vui lòng đăng nhập lại.' });
 });
@@ -173,12 +173,12 @@ app.patch('/api/accounts/:id', async (req, res) => {
 });
 app.delete('/api/accounts/:id', async (req, res) => { await db.protectedAccount.deleteMany({ where: { id: req.params.id, userId: req.user.id } }); res.json({ ok: true }); });
 app.get('/api/sessions', async (req, res) => {
-  const { rows } = await pool.query("SELECT sid, sess->'device' AS device FROM session WHERE sess->>'userId' = $1 AND expire > NOW()", [req.user.id]);
+  const rows = sessions.list(req.user.id).map(s => ({ sid: s.sid, device: s.sess.device }));
   res.json(rows.map(r => ({ id: hash(r.sid), current: r.sid === req.sessionID, ...r.device })));
 });
 app.delete('/api/sessions/:id', async (req, res) => {
-  const { rows } = await pool.query("SELECT sid FROM session WHERE sess->>'userId' = $1", [req.user.id]);
-  for (const row of rows) if (hash(row.sid) === req.params.id) await pool.query('DELETE FROM session WHERE sid = $1', [row.sid]);
+  const rows = sessions.list(req.user.id);
+  for (const row of rows) if (hash(row.sid) === req.params.id) await sessions.destroy(row.sid);
   await event(req, 'SESSION_REVOKED'); res.json({ ok: true });
 });
 app.post('/api/2fa/setup', async (req, res) => {

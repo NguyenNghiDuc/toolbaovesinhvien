@@ -1,14 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
-import { db, pool } from '../src/db.js';
-import { passwordHash, random } from '../src/security.js';
+import path from 'node:path';
+import { randomBytes } from 'node:crypto';
+const random = () => randomBytes(16).toString('hex');
+const readState = () => JSON.parse(readFileSync(path.join(process.env.DATA_DIR, 'store.json'), 'utf8'));
 
 test('Chromium: login, account update, policy, school, dark/light and mobile', { timeout: 60000 }, async () => {
   const suffix = random().slice(0, 8), email = `browser-${suffix}@example.com`;
-  const user = await db.user.create({ data: { email, name: 'Kiểm thử giao diện', role: 'SUPER_ADMIN', verified: true, passwordHash: await passwordHash('Browser-test-password-2026!') } });
+  const bootstrap = spawnSync(process.execPath, ['src/bootstrap.js'], { env: { ...process.env, BOOTSTRAP_EMAIL: email, BOOTSTRAP_PASSWORD: 'Browser-test-password-2026!' }, encoding: 'utf8' });
+  assert.equal(bootstrap.status, 0, bootstrap.stderr);
   const server = spawn(process.execPath, ['src/server.js'], { env: { ...process.env, PORT: '3101', APP_URL: 'http://localhost:3101' }, stdio: 'pipe' });
   let browser, schoolId;
   const errors = [];
@@ -30,7 +33,7 @@ test('Chromium: login, account update, policy, school, dark/light and mobile', {
     await page.getByRole('heading', { name: 'University email' }).waitFor();
     await page.locator('[data-flag="has2fa"]').check();
     await page.waitForTimeout(150);
-    assert.equal((await db.protectedAccount.findFirst({ where: { userId: user.id } })).has2fa, true);
+    assert.equal(readState().protectedAccount[0].has2fa, true);
     await page.getByRole('button', { name: 'Chính sách hệ thống' }).click();
     await page.getByLabel('Độ dài mật khẩu tối thiểu (12–64)').waitFor();
     await page.getByRole('button', { name: 'Lưu chính sách' }).click();
@@ -39,7 +42,7 @@ test('Chromium: login, account update, policy, school, dark/light and mobile', {
     await page.getByLabel('Mã trường (3–20 chữ hoa, số, _ hoặc -)').fill(`UI-${suffix.toUpperCase()}`);
     await page.getByRole('button', { name: 'Tạo trường', exact: true }).click();
     await page.getByRole('heading', { name: 'Browser Test School' }).waitFor();
-    schoolId = (await db.school.findUnique({ where: { code: `UI-${suffix.toUpperCase()}` } })).id;
+    schoolId = readState().school.find(s => s.code === `UI-${suffix.toUpperCase()}`).id;
     await page.getByRole('button', { name: 'Đổi giao diện' }).click();
     assert.equal(await page.locator('body').evaluate(el => el.classList.contains('light')), true);
     await page.getByRole('button', { name: 'Tổng quan bảo mật' }).click();
@@ -52,10 +55,6 @@ test('Chromium: login, account update, policy, school, dark/light and mobile', {
     await page.getByRole('button', { name: 'Đăng nhập an toàn' }).waitFor();
   } finally {
     if (browser) await browser.close(); server.kill('SIGTERM');
-    await db.securityEvent.deleteMany({ where: { userId: user.id } });
-    await db.user.delete({ where: { id: user.id } });
-    if (schoolId) await db.school.delete({ where: { id: schoolId } });
-    await pool.query("DELETE FROM session WHERE sess->>'userId' = $1", [user.id]);
-    await db.$disconnect(); await pool.end();
+    if (server.exitCode === null) await new Promise(resolve => server.once('exit', resolve));
   }
 });

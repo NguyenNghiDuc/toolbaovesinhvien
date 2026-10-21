@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { randomBytes } from 'node:crypto';
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studentshield-test-'));
+process.env.DATA_DIR = dir;
+process.env.NODE_ENV = 'test';
+process.env.MAIL_MODE = 'file';
+process.env.SESSION_SECRET = randomBytes(48).toString('hex');
+process.env.DATA_ENCRYPTION_KEY = randomBytes(32).toString('hex');
+process.env.APP_URL = 'http://localhost:8080';
+process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
